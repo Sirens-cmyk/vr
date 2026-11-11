@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>شبیه‌سازی سه‌بعدی پیشرفته فروشگاه و رفتار مصرف‌کننده</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body, html { width: 100%; height: 100%; overflow: hidden; background: #070a13; color: #fff; }
+    #canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+    
+    /* UI Sidebar Right */
+    .ui-sidebar { position: absolute; top: 15px; right: 15px; z-index: 10; width: 260px; display: flex; flex-direction: column; gap: 8px; }
+    .ui-panel { background: rgba(15, 23, 42, 0.92); backdrop-filter: blur(10px); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 12px; padding: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+    .panel-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 13px; font-weight: bold; color: #38bdf8; }
+    .panel-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; font-size: 11px; color: #cbd5e1; }
+    .ui-panel.open .panel-content { max-height: 280px; margin-top: 10px; }
+    .btn { width: 100%; padding: 8px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 11px; margin-top: 8px; font-weight: bold; transition: 0.2s; }
+    .btn:hover { background: #1d4ed8; }
+    .hotspot-item { padding: 6px 8px; background: rgba(255,255,255,0.05); margin-bottom: 4px; border-radius: 6px; cursor: pointer; font-size: 11px; transition: 0.2s; border-right: 3px solid transparent; }
+    .hotspot-item:hover { background: rgba(56, 189, 248, 0.15); border-right-color: #38bdf8; }
+
+    /* Shopping Cart & Modal */
+    .cart-widget { position: absolute; bottom: 15px; left: 15px; z-index: 10; background: rgba(15, 23, 42, 0.95); border: 1px solid #10b981; border-radius: 12px; padding: 10px 16px; font-size: 12px; color: #10b981; font-weight: bold; display: flex; gap: 12px; align-items: center; box-shadow: 0 4px 15px rgba(0,0,0,0.4); }
+    .modal { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 20; background: rgba(15, 23, 42, 0.98); border: 1px solid #38bdf8; border-radius: 14px; padding: 18px; width: 300px; display: none; box-shadow: 0 10px 40px rgba(0,0,0,0.8); }
+    .modal h3 { color: #38bdf8; font-size: 14px; margin-bottom: 8px; }
+    .modal p { font-size: 11px; color: #cbd5e1; margin-bottom: 12px; line-height: 1.5; }
+    .modal .price { font-size: 13px; color: #10b981; font-weight: bold; margin-bottom: 12px; }
+    .close-btn { position: absolute; top: 8px; left: 12px; background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+
+  <!-- UI Sidebar Right -->
+  <div class="ui-sidebar">
+    <div class="ui-panel open">
+      <div class="panel-header" onclick="this.parentElement.classList.toggle('open')">
+        <span>🛒 کنترل شبیه‌ساز</span>
+        <span>▼</span>
+      </div>
+      <div class="panel-content">
+        <p>تحلیل بصری رفتار مصرف‌کننده در محیط سه‌بعدی فروشگاه.</p>
+        <button class="btn" id="tour-btn" onclick="toggleTour()">▶ تور خودکار ارائه</button>
+      </div>
+    </div>
+    <div class="ui-panel">
+      <div class="panel-header" onclick="this.parentElement.classList.toggle('open')">
+        <span>🎯 نقاط استراتژیک (Hotspots)</span>
+        <span>▼</span>
+      </div>
+      <div class="panel-content">
+        <div class="hotspot-item" onclick="focusHotspot(0)">۱. خریدهای هیجانی (ورودی)</div>
+        <div class="hotspot-item" onclick="focusHotspot(1)">۲. قفسه طلایی (سطح دید چشم)</div>
+        <div class="hotspot-item" onclick="focusHotspot(2)">۳. قفسه خوراکی‌ها (تکسچر واقعی)</div>
+        <div class="hotspot-item" onclick="focusHotspot(3)">۴. منطقه صندوق و خریدهای شتاب‌زده</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shopping Cart Widget -->
+  <div class="cart-widget">
+    <span>🛍️ سبد خرید: <span id="cart-count">۰</span> کالا</span>
+    <span>|</span>
+    <span>مجموع: <span id="cart-total">۰</span> هزار تومان</span>
+  </div>
+
+  <!-- Product Modal -->
+  <div class="modal" id="prod-modal">
+    <button class="close-btn" onclick="closeModal()">✕</button>
+    <h3 id="m-title">نام محصول</h3>
+    <p id="m-desc">توضیحات روانشناسی رفتار مصرف‌کننده...</p>
+    <div class="price" id="m-price">قیمت: ۰ تومان</div>
+    <button class="btn" style="background:#10b981;" onclick="addToCart()">🛒 افزودن به سبد خرید</button>
+  </div>
+
+  <script>
+    // Canvas & Scene Setup
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x070a13);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 6, 13);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    dirLight.position.set(8, 18, 10);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
+
+    const pointLight = new THREE.PointLight(0x38bdf8, 1, 15);
+    pointLight.position.set(0, 4, 0);
+    scene.add(pointLight);
+
+    // Dynamic Procedural Canvas Textures
+    function createShampooTexture() {
+      const cv = document.createElement('canvas'); cv.width = 256; cv.height = 512;
+      const ctx = cv.getContext('2d');
+      const grad = ctx.createLinearGradient(0,0,0,512);
+      grad.addColorStop(0, '#ec4899'); grad.addColorStop(0.5, '#be185d'); grad.addColorStop(1, '#831843');
+      ctx.fillStyle = grad; ctx.fillRect(0,0,256,512);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 28px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('SHAMPOO', 128, 180);
+      ctx.font = '18px sans-serif'; ctx.fillText('Keratin Smooth', 128, 220);
+      ctx.fillStyle = '#fef08a'; ctx.fillRect(40, 260, 176, 40);
+      ctx.fillStyle = '#000000'; ctx.font = 'bold 16px sans-serif'; ctx.fillText('SPECIAL OFFER', 128, 285);
+      return new THREE.CanvasTexture(cv);
+    }
+
+    function createCreamTexture() {
+      const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#38bdf8'; ctx.fillRect(0,0,256,256);
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 10; ctx.strokeRect(10,10,236,236);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 26px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('FACE CREAM', 128, 120);
+      ctx.font = '16px sans-serif'; ctx.fillText('Hydrating Care', 128, 150);
+      return new THREE.CanvasTexture(cv);
+    }
+
+    function createSodaTexture() {
+      const cv = document.createElement('canvas'); cv.width = 256; cv.height = 512;
+      const ctx = cv.getContext('2d');
+      const grad = ctx.createLinearGradient(0,0,256,0);
+      grad.addColorStop(0, '#dc2626'); grad.addColorStop(0.5, '#ef4444'); grad.addColorStop(1, '#991b1b');
+      ctx.fillStyle = grad; ctx.fillRect(0,0,256,512);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 36px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('COLA', 128, 200);
+      ctx.font = 'bold 20px sans-serif'; ctx.fillText('REAL TASTE', 128, 240);
+      ctx.fillStyle = '#eab308'; ctx.beginPath(); ctx.arc(128, 330, 35, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#000000'; ctx.font = 'bold 14px sans-serif'; ctx.fillText('NEW', 128, 335);
+      return new THREE.CanvasTexture(cv);
+    }
+
+    function createCanTexture() {
+      const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#f59e0b'; ctx.fillRect(0,0,256,256);
+      ctx.fillStyle = '#78350f'; ctx.fillRect(0,40,256,30);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 24px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('TUNA CAN', 128, 140);
+      return new THREE.CanvasTexture(cv);
+    }
+
+    const texShampoo = createShampooTexture();
+    const texCream = createCreamTexture();
+    const texSoda = createSodaTexture();
+    const texCan = createCanTexture();
+
+    // Store Environment Creation
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4 });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(22, 26), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    const grid = new THREE.GridHelper(26, 26, 0x38bdf8, 0x334155);
+    grid.position.y = 0.01;
+    scene.add(grid);
+
+    // Checkout Counter
+    const counterMat = new THREE.MeshStandardMaterial({ color: 0x0f172a });
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(4, 1.2, 1.5), counterMat);
+    counter.position.set(0, 0.6, 5);
+    counter.castShadow = true;
+    scene.add(counter);
+
+    const clickables = [];
+
+    // Detailed Shelves Builder
+    function createShelfStructure(x, z) {
+      const g = new THREE.Group();
+      const shelfMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.2, roughness: 0.5 });
+      
+      // Vertical Frame Poles
+      [-0.9, 0.9].forEach(px => {
+        [-1.9, 1.9].forEach(pz => {
+          const pole = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.6, 0.1), shelfMat);
+          pole.position.set(px, 1.3, pz);
+          g.add(pole);
+        });
+      });
+
+      // Horizontal Shelf Layers
+      [0.2, 1.0, 1.8, 2.5].forEach(py => {
+        const board = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.08, 3.9), shelfMat);
+        board.position.set(0, py, 0);
+        board.receiveShadow = true;
+        g.add(board);
+      });
+
+      g.position.set(x, 0, z);
+      scene.add(g);
+      return g;
+    }
+
+    // Cosmetics Shelf (Left Side)
+    createShelfStructure(-4.5, 0);
+
+    // Populating Cosmetics (Shampoo Bottles & Cream Boxes)
+    for(let z = -1.6; z <= 1.6; z += 0.55) {
+      // 3D Shampoo Bottle (Cylinder + Cap)
+      const bottleGroup = new THREE.Group();
+      const bodyGeo = new THREE.CylinderGeometry(0.12, 0.14, 0.5, 24);
+      const bodyMat = new THREE.MeshStandardMaterial({ map: texShampoo, roughness: 0.3 });
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      body.position.y = 0.25;
+      bottleGroup.add(body);
+
+      const capGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.1, 16);
+      const capMat = new THREE.MeshStandardMaterial({ color: 0xf43f5e });
+      const cap = new THREE.Mesh(capGeo, capMat);
+      cap.position.y = 0.53;
+      bottleGroup.add(cap);
+
+      bottleGroup.position.set(-4.1, 1.8, z); // Golden Eye-level Shelf
+      bottleGroup.userData = { 
+        name: "شامپو تقویتی (برجستگی بصری)", 
+        price: 95, 
+        desc: "این محصول در قفسه طلایی (سطح دید ۱۲۰-۱۶۰ سانتی‌متر) با رنگ صورتی شاخص و لیبل ویژه قرار گرفته که تا ۶۰٪ نرخ توجه مصرف‌کننده را افزایش می‌دهد." 
+      };
+      scene.add(bottleGroup);
+      clickables.push(body);
+
+      // 3D Cream Box
+      const boxGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
+      const boxMat = new THREE.MeshStandardMaterial({ map: texCream });
+      const creamBox = new THREE.Mesh(boxGeo, boxMat);
+      creamBox.position.set(-4.1, 1.14, z);
+      creamBox.userData = { 
+        name: "کرم مرطوب‌کننده", 
+        price: 65, 
+        desc: "چیدمان در طبقه دوم با کنتراست رنگی آبی‌آسمانی جهت ایجاد حس اعتماد و ترغیب به لمس محصول." 
+      };
+      scene.add(creamBox);
+      clickables.push(creamBox);
+    }
+
+    // Groceries & Drinks Shelf (Right Side)
+    createShelfStructure(4.5, 0);
+
+    // Populating Grocery Items (Soda Cans & Canned Foods)
+    for(let z = -1.6; z <= 1.6; z += 0.55) {
+      // 3D Soda Can
+      const sodaGroup = new THREE.Group();
+      const sodaGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.45, 24);
+      const sodaMat = new THREE.MeshStandardMaterial({ map: texSoda, metalness: 0.5, roughness: 0.2 });
+      const sodaCan = new THREE.Mesh(sodaGeo, sodaMat);
+      sodaCan.position.y = 0.225;
+      sodaGroup.add(sodaCan);
+
+      const ringGeo = new THREE.TorusGeometry(0.08, 0.02, 8, 16);
+      const ringMat = new THREE.MeshStandardMaterial({ color: 0xd1d5db, metalness: 0.8 });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.46;
+      sodaGroup.add(ring);
+
+      sodaGroup.position.set(4.1, 1.8, z);
+      sodaGroup.userData = { 
+        name: "نوشابه قوطی (محرک هیجانی)", 
+        price: 30, 
+        desc: "استفاده از رنگ قرمز تند و لیبل طلایی برای تحریک فوری خریدار و اخذ تصمیم‌گیری لحظه‌ای زیر ۳ ثانیه." 
+      };
+      scene.add(sodaGroup);
+      clickables.push(sodaCan);
+
+      // 3D Tuna Can
+      const canGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.2, 24);
+      const canMat = new THREE.MeshStandardMaterial({ map: texCan, metalness: 0.4 });
+      const tunaCan = new THREE.Mesh(canGeo, canMat);
+      tunaCan.position.set(4.1, 1.1, z);
+      tunaCan.userData = { 
+        name: "کنسرو تن ماهی", 
+        price: 55, 
+        desc: "دسته‌بندی کنسروها در ردیف پایین‌تر با برچسب مشخصات واضح جهت تکمیل سبد خرید خانوار." 
+      };
+      scene.add(tunaCan);
+      clickables.push(tunaCan);
+    }
+
+    // Interactive Hotspots Data
+    const hotspotsData = [
+      { pos: {x:0, y:1.5, z:9}, title: "۱. ورودی و خریدهای هیجانی", desc: "نقطه تصمیم‌گیری اول: ۵ ثانیه نخست ورود مشتری شانس ایجاد تصویر مثبت از فروشگاه را مشخص می‌سازد." },
+      { pos: {x:-3.8, y:1.8, z:0}, title: "۲. قفسه طلایی (سطح دید)", desc: "ارتفاع ۱۲۰ تا ۱۶۰ سانتی‌متری قفسه آرایشی که بیشترین نرخ دیده شدن و فروش را کسب می‌کند." },
+      { pos: {x:3.8, y:1.8, z:0}, title: "۳. خوراکی‌ها با تکسچر واقعی", desc: "تأثیر محرک‌های بصری، رنگ‌های گرم و برندینگ اشتهاآور روی تصمیم به خرید لحظه‌ای." },
+      { pos: {x:0, y:1.5, z:5}, title: "۴. منطقه صندوق و صف خروج", desc: "آخرین شانس فروشگاه برای خریدهای لحظه آخر (Impulse Buying) مانند آدامس و تنقلات کوچکی." }
+    ];
+
+    const hotspotMeshes = [];
+    hotspotsData.forEach((d, i) => {
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(0.22, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0x38bdf8, wireframe: true })
+      );
+      m.position.set(d.pos.x, d.pos.y, d.pos.z);
+      scene.add(m);
+      hotspotMeshes.push(m);
+    });
+
+    // Cart and Modal Logic
+    let cartCount = 0;
+    let cartTotal = 0;
+    let activeProduct = null;
+
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    window.addEventListener('click', (e) => {
+      if(e.target.closest('.ui-sidebar') || e.target.closest('.cart-widget') || e.target.closest('.modal')) return;
+      
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+
+      const intersects = raycaster.intersectObjects(clickables);
+      if (intersects.length > 0) {
+        const obj = intersects[0].object;
+        activeProduct = obj.userData || (obj.parent && obj.parent.userData);
+        if(activeProduct && activeProduct.name) {
+          document.getElementById('m-title').innerText = activeProduct.name;
+          document.getElementById('m-desc').innerText = activeProduct.desc;
+          document.getElementById('m-price').innerText = `قیمت: ${activeProduct.price},۰۰۰ تومان`;
+          document.getElementById('prod-modal').style.display = 'block';
+        }
+      }
+    });
+
+    function addToCart() {
+      if(activeProduct) {
+        cartCount++;
+        cartTotal += activeProduct.price;
+        document.getElementById('cart-count').innerText = cartCount;
+        document.getElementById('cart-total').innerText = cartTotal;
+        closeModal();
+      }
+    }
+
+    function closeModal() {
+      document.getElementById('prod-modal').style.display = 'none';
+    }
+
+    function focusHotspot(i) {
+      const t = hotspotsData[i];
+      camera.position.set(t.pos.x + 2, t.pos.y + 1.5, t.pos.z + 3.5);
+      controls.target.set(t.pos.x, t.pos.y, t.pos.z);
+    }
+
+    let isTouring = false, angle = 0;
+    function toggleTour() {
+      isTouring = !isTouring;
+      document.getElementById('tour-btn').innerText = isTouring ? "⏹ توقف تور" : "▶ تور خودکار ارائه";
+    }
+
+    // Animation Loop
+    function animate() {
+      requestAnimationFrame(animate);
+      hotspotMeshes.forEach(m => m.rotation.y += 0.02);
+      
+      if (isTouring) {
+        angle += 0.004;
+        camera.position.x = Math.sin(angle) * 11;
+        camera.position.z = Math.cos(angle) * 11 + 2;
+        controls.target.set(0, 1.2, 0);
+      }
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
